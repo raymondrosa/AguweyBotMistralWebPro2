@@ -1,5 +1,5 @@
 # ============================================
-# AGUWEYBOT - VERSIÓN MINISTRAL-3 (CÓDIGO COMPLETO CORREGIDO)
+# AGUWEYBOT - VERSIÓN MINISTRAL-3 (CÓDIGO CORREGIDO FINAL)
 # COMPATIBLE CON STREAMLIT CLOUD - ABRIL 2026
 # ============================================
 
@@ -11,29 +11,14 @@ import streamlit.components.v1 as components
 import re
 import io
 import json
+import requests
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 
 # ============================================
-# IMPORTACIÓN DE MISTRAL AI (COMPATIBILIDAD MÚLTIPLE)
+# IMPORTACIÓN DE MISTRAL AI - MÉTODO DIRECTO CON REQUESTS
 # ============================================
-MISTRAL_NEW_API = False
-client = None
-
-try:
-    # Intento 1: API más reciente (mistralai >= 1.0.0)
-    from mistralai.client import MistralClient
-    from mistralai.models.chat_completion import ChatMessage
-    MISTRAL_NEW_API = True
-    print("✅ Usando Mistral AI API v1.x")
-except ImportError:
-    try:
-        # Intento 2: API anterior (mistralai >= 0.0.7)
-        from mistralai import Mistral
-        print("✅ Usando Mistral AI API v0.x")
-    except ImportError:
-        # Intento 3: Fallback - se mostrará error
-        print("❌ No se pudo importar Mistral AI")
+# Usamos requests directamente para evitar problemas de compatibilidad
 
 # Para documentos
 from PyPDF2 import PdfReader
@@ -55,23 +40,14 @@ except ImportError:
 # CONFIGURACIÓN
 # ============================================
 MODEL_NAME = "ministral-3b-latest"
+MISTRAL_API_URL = "https://api.mistral.ai/v1/chat/completions"
 
 # Verificar API key
 if "MISTRAL_API_KEY" not in st.secrets:
     st.error("❌ No se encontró la API Key de MISTRAL AI en los secrets")
     st.stop()
 
-# Inicializar cliente según disponibilidad
-try:
-    if MISTRAL_NEW_API:
-        client = MistralClient(api_key=st.secrets["MISTRAL_API_KEY"])
-    else:
-        # Fallback a importación dinámica
-        from mistralai import Mistral
-        client = Mistral(api_key=st.secrets["MISTRAL_API_KEY"])
-except Exception as e:
-    st.error(f"❌ Error al inicializar Mistral AI: {str(e)}")
-    st.stop()
+MISTRAL_API_KEY = st.secrets["MISTRAL_API_KEY"]
 
 # Directorio para guardar conversaciones
 SAVE_DIR = "conversaciones_guardadas"
@@ -110,7 +86,6 @@ REGLAS:
 - Si no encuentras algo en el archivo, dilo honestamente
 - Usa emojis para hacer las respuestas más amigables
 - Responde de manera clara, concisa y profesional
-- Mantén un tono amigable pero formal
 """
 
 # ============================================
@@ -578,46 +553,76 @@ def leer_archivo_completo(uploaded_file):
         return None, f"Error inesperado: {str(e)}"
 
 # ============================================
-# FUNCIÓN PARA STREAMING CON MINISTRAL (CORREGIDA)
+# FUNCIÓN PARA STREAMING CON MISTRAL (API DIRECTA CON REQUESTS)
 # ============================================
 def generar_respuesta_streaming(messages, container):
+    """Genera respuesta con streaming usando la API REST de Mistral directamente"""
     try:
         full_response = ""
         response_container = container.empty()
         
-        # Usar la API según disponibilidad
-        if MISTRAL_NEW_API:
-            stream_response = client.chat_stream(
-                model=MODEL_NAME,
-                messages=messages,
-                temperature=0.2,
-                max_tokens=2000,
-            )
-        else:
-            stream_response = client.chat.stream(
-                model=MODEL_NAME,
-                messages=messages,
-                temperature=0.2,
-                max_tokens=2000,
-            )
+        headers = {
+            "Authorization": f"Bearer {MISTRAL_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        
+        # Preparar mensajes en el formato correcto
+        formatted_messages = []
+        for msg in messages:
+            formatted_messages.append({
+                "role": msg["role"],
+                "content": msg["content"]
+            })
+        
+        data = {
+            "model": MODEL_NAME,
+            "messages": formatted_messages,
+            "temperature": 0.2,
+            "max_tokens": 2000,
+            "stream": True
+        }
+        
+        # Hacer la solicitud con streaming
+        response = requests.post(
+            MISTRAL_API_URL,
+            headers=headers,
+            json=data,
+            stream=True,
+            timeout=60
+        )
+        
+        if response.status_code != 200:
+            st.error(f"❌ Error de API: {response.status_code}")
+            return f"Error: {response.text}"
         
         start_time = time.time()
         
-        for chunk in stream_response:
-            if MISTRAL_NEW_API:
-                content = chunk.choices[0].delta.content
-            else:
-                content = chunk.data.choices[0].delta.content
-                
-            if content is not None:
-                full_response += content
-                
-                elapsed = time.time() - start_time
-                response_container.markdown(
-                    f'<div class="respuesta-aguwey" style="position: relative;">{full_response}▌<div style="position: absolute; bottom: 5px; right: 10px; font-size: 10px; color: #666;">Generando... {elapsed:.1f}s</div></div>',
-                    unsafe_allow_html=True
-                )
-                time.sleep(0.002)
+        # Procesar el stream
+        for line in response.iter_lines():
+            if line:
+                line = line.decode('utf-8')
+                if line.startswith('data: '):
+                    line = line[6:]  # Quitar 'data: '
+                    if line.strip() == '[DONE]':
+                        break
+                    
+                    try:
+                        chunk = json.loads(line)
+                        if 'choices' in chunk and len(chunk['choices']) > 0:
+                            delta = chunk['choices'][0].get('delta', {})
+                            content = delta.get('content', '')
+                            
+                            if content:
+                                full_response += content
+                                
+                                elapsed = time.time() - start_time
+                                response_container.markdown(
+                                    f'<div class="respuesta-aguwey" style="position: relative;">{full_response}▌<div style="position: absolute; bottom: 5px; right: 10px; font-size: 10px; color: #666;">Generando... {elapsed:.1f}s</div></div>',
+                                    unsafe_allow_html=True
+                                )
+                                time.sleep(0.002)
+                    except json.JSONDecodeError:
+                        continue
         
         elapsed = time.time() - start_time
         response_container.markdown(
@@ -627,9 +632,15 @@ def generar_respuesta_streaming(messages, container):
         
         return full_response
         
+    except requests.exceptions.Timeout:
+        st.error("❌ Timeout: La solicitud excedió el tiempo límite")
+        return "Error: Tiempo de espera agotado"
+    except requests.exceptions.RequestException as e:
+        st.error(f"❌ Error de conexión: {str(e)}")
+        return f"Error de conexión: {str(e)}"
     except Exception as e:
-        st.error(f"❌ Error en streaming: {str(e)}")
-        return f"Error al generar respuesta: {str(e)}"
+        st.error(f"❌ Error inesperado: {str(e)}")
+        return f"Error: {str(e)}"
 
 # ============================================
 # TEXTO A VOZ
@@ -709,7 +720,7 @@ def main():
         st.markdown("---")
         
         st.markdown("### 🔑 Estado")
-        st.success("✅ Mistral AI conectado")
+        st.success("✅ Mistral AI conectado (API REST)")
         st.markdown(f"<span style='font-size:12px'>🤖 Modelo: <strong>{MODEL_NAME}</strong></span>", unsafe_allow_html=True)
         if TTS_AVAILABLE:
             st.success("✅ Audio disponible")
@@ -911,7 +922,7 @@ PREGUNTA: {prompt}
     st.markdown(
         f"""
         <div class="fixed-footer">
-            <strong>CC-SA</strong> Prof. Raymond Rosa Ávila • AguweyBot con Ministral-3 2026 • 🚀 v5.0
+            <strong>CC-SA</strong> Prof. Raymond Rosa Ávila • AguweyBot con Ministral-3 2026 • 🚀 v5.1
         </div>
         """,
         unsafe_allow_html=True
