@@ -1,0 +1,52 @@
+# ============================================
+# CONFIGURACIÓN DE STREAMLIT PARA AGUWEYBOT
+# ============================================
+
+[theme]
+# Tema cyberpunk/neón
+primaryColor = "#00ffff"
+backgroundColor = "#0a0c10"
+secondaryBackgroundColor = "#1e2a3a"
+textColor = "#ffffff"
+font = "sans serif"
+
+[server]
+# Límite máximo de subida (50 MB)
+maxUploadSize = 50
+
+# Protección CSRF (mantener activada)
+enableXsrfProtection = true
+
+# CORS (desactivado para Streamlit Cloud)
+enableCORS = false
+
+# Directorio de archivos estáticos (si tienes imágenes)
+# folderForStatic = "static"
+
+[browser]
+# No recopilar estadísticas de uso
+gatherUsageStats = false
+
+# Título de la pestaña del navegador
+serverAddress = "AguweyBot"
+
+[logger]
+# Nivel de logging (debug, info, warning, error)
+level = "info"
+
+# Formato de los logs
+messageFormat = "%(asctime)s %(levelname)s: %(message)s"
+
+[runner]
+# Mostrar errores detallados
+showTracebacks = true
+
+# Magnificación de la interfaz
+# magnification = "auto"
+
+[client]
+# Mostrar barra lateral por defecto
+showSidebarNavigation = true
+
+# Toolbar mode (auto, developer, viewer, minimal)
+toolbarMode = "auto"
