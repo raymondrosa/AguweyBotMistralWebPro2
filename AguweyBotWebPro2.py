@@ -729,7 +729,7 @@ def texto_a_audio_unico(texto: str) -> Optional[bytes]:
         return None
     
     try:
-        texto_limpio = re.sub(r'[#*_`\[\]()📄📊🔊🔗🔘🎯✅❌⚠️]', '', texto)
+        texto_limpio = re.sub(r'[#*_`\[\]()---+📄📊🔊🔗🔘🎯✅❌⚠️📌📚🔹💡🔧🌳🌟🤔🛠️📈🔍📍📏📝👍📐⏳🌍]', '', texto)
         texto_limpio = re.sub(r'\s+', ' ', texto_limpio).strip()
         
         if not texto_limpio:
