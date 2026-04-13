@@ -1,6 +1,6 @@
 # ============================================
-# AGUWEYBOT - VERSIÓN MINISTRAL-3 (API CORREGIDA)
-# CON GUARDADO DE CONVERSACIONES
+# AGUWEYBOT - VERSIÓN MINISTRAL-3 (CÓDIGO COMPLETO CORREGIDO)
+# COMPATIBLE CON STREAMLIT CLOUD - ABRIL 2026
 # ============================================
 
 import os
@@ -11,11 +11,29 @@ import streamlit.components.v1 as components
 import re
 import io
 import json
-from typing import Optional, Tuple, List, Dict, Any
+from typing import Optional, List, Dict, Any
 from datetime import datetime
 
-# CAMBIO: Importar correctamente para Mistral AI (versión actual)
-from mistralai import Mistral
+# ============================================
+# IMPORTACIÓN DE MISTRAL AI (COMPATIBILIDAD MÚLTIPLE)
+# ============================================
+MISTRAL_NEW_API = False
+client = None
+
+try:
+    # Intento 1: API más reciente (mistralai >= 1.0.0)
+    from mistralai.client import MistralClient
+    from mistralai.models.chat_completion import ChatMessage
+    MISTRAL_NEW_API = True
+    print("✅ Usando Mistral AI API v1.x")
+except ImportError:
+    try:
+        # Intento 2: API anterior (mistralai >= 0.0.7)
+        from mistralai import Mistral
+        print("✅ Usando Mistral AI API v0.x")
+    except ImportError:
+        # Intento 3: Fallback - se mostrará error
+        print("❌ No se pudo importar Mistral AI")
 
 # Para documentos
 from PyPDF2 import PdfReader
@@ -31,19 +49,29 @@ try:
     TTS_AVAILABLE = True
 except ImportError:
     TTS_AVAILABLE = False
+    print("⚠️ gTTS no disponible")
 
 # ============================================
 # CONFIGURACIÓN
 # ============================================
-MODEL_NAME = "ministral-3b-latest"  # Modelo de Mistral AI
+MODEL_NAME = "ministral-3b-latest"
 
 # Verificar API key
 if "MISTRAL_API_KEY" not in st.secrets:
-    st.error("❌ No se encontró la API Key de MISTRAL AI")
+    st.error("❌ No se encontró la API Key de MISTRAL AI en los secrets")
     st.stop()
 
-# Inicializar cliente Mistral (versión corregida)
-client = Mistral(api_key=st.secrets["MISTRAL_API_KEY"])
+# Inicializar cliente según disponibilidad
+try:
+    if MISTRAL_NEW_API:
+        client = MistralClient(api_key=st.secrets["MISTRAL_API_KEY"])
+    else:
+        # Fallback a importación dinámica
+        from mistralai import Mistral
+        client = Mistral(api_key=st.secrets["MISTRAL_API_KEY"])
+except Exception as e:
+    st.error(f"❌ Error al inicializar Mistral AI: {str(e)}")
+    st.stop()
 
 # Directorio para guardar conversaciones
 SAVE_DIR = "conversaciones_guardadas"
@@ -53,20 +81,15 @@ os.makedirs(SAVE_DIR, exist_ok=True)
 # CONSTANTES Y CONFIGURACIÓN VISUAL
 # ============================================
 class Config:
-    # Colores
     PRIMARY_COLOR = "#00ffff"
     SECONDARY_COLOR = "#00cccc"
     BACKGROUND_DARK = "#0a0c10"
     CARD_BACKGROUND = "#1e2a3a"
-    
-    # Rutas de archivos
     LOGO_PATH = "logo.png"
     BACKGROUND_PATH = "fondo.png"
-    
-    # Límites
     MAX_HISTORY_MESSAGES = 10
     MAX_FILE_SIZE_MB = 50
-    MAX_CONTEXT_TOKENS = 8000  # Límite para ministral-3
+    MAX_CONTEXT_TOKENS = 8000
 
 # ============================================
 # SYSTEM PROMPT
@@ -88,21 +111,16 @@ REGLAS:
 - Usa emojis para hacer las respuestas más amigables
 - Responde de manera clara, concisa y profesional
 - Mantén un tono amigable pero formal
-- Sé eficiente en las respuestas (modelo optimizado)
 """
 
 # ============================================
 # GESTIÓN DE CONVERSACIONES GUARDADAS
 # ============================================
 class ConversacionGuardada:
-    """Clase para manejar conversaciones guardadas"""
-    
     @staticmethod
     def guardar_conversacion(messages: List[Dict], nombre: str = None) -> str:
-        """Guarda una conversación en archivo JSON"""
         if not nombre:
-            # Generar nombre automático basado en la primera pregunta
-            first_user_msg = next((m["content"] for m in messages if m["role"] == "user"), "Nueva conversación")
+            first_user_msg = next((m["content"] for m in messages if m["role"] == "user"), "Nueva conversacion")
             nombre = first_user_msg[:50].replace(" ", "_").replace("/", "_").replace("\\", "_")
             nombre = re.sub(r'[^\w\-_\.]', '', nombre)
         
@@ -124,7 +142,6 @@ class ConversacionGuardada:
     
     @staticmethod
     def cargar_conversacion(filename: str) -> Optional[List[Dict]]:
-        """Carga una conversación desde archivo JSON"""
         try:
             with open(filename, 'r', encoding='utf-8') as f:
                 data = json.load(f)
@@ -135,9 +152,7 @@ class ConversacionGuardada:
     
     @staticmethod
     def listar_conversaciones() -> List[Dict[str, Any]]:
-        """Lista todas las conversaciones guardadas"""
         conversaciones = []
-        
         if not os.path.exists(SAVE_DIR):
             return conversaciones
         
@@ -147,7 +162,6 @@ class ConversacionGuardada:
                 try:
                     with open(filepath, 'r', encoding='utf-8') as f:
                         data = json.load(f)
-                    
                     conversaciones.append({
                         "filename": filepath,
                         "nombre": data.get("nombre", "Sin nombre"),
@@ -158,13 +172,11 @@ class ConversacionGuardada:
                 except:
                     continue
         
-        # Ordenar por timestamp (más reciente primero)
         conversaciones.sort(key=lambda x: x["timestamp"], reverse=True)
         return conversaciones
     
     @staticmethod
     def eliminar_conversacion(filename: str) -> bool:
-        """Elimina una conversación guardada"""
         try:
             if os.path.exists(filename):
                 os.remove(filename)
@@ -177,7 +189,6 @@ class ConversacionGuardada:
 # FUNCIÓN PARA TRUNCAR CONTEXTO
 # ============================================
 def truncar_contexto(texto: str, max_caracteres: int = 6000) -> str:
-    """Trunca el contexto para no exceder límites de ministral-3"""
     if len(texto) <= max_caracteres:
         return texto
     
@@ -201,7 +212,6 @@ def truncar_contexto(texto: str, max_caracteres: int = 6000) -> str:
 # FUNCIÓN PARA FONDO
 # ============================================
 def set_background():
-    """Aplica la imagen de fondo si existe con manejo de errores"""
     if os.path.exists(Config.BACKGROUND_PATH):
         try:
             with open(Config.BACKGROUND_PATH, "rb") as f:
@@ -218,7 +228,6 @@ def set_background():
                     background-attachment: fixed;
                     background-repeat: no-repeat;
                 }}
-                
                 .main .block-container {{
                     background-color: rgba(0, 0, 0, 0.7);
                     backdrop-filter: blur(10px);
@@ -233,14 +242,8 @@ def set_background():
                 """,
                 unsafe_allow_html=True
             )
-        except Exception as e:
-            st.markdown(f"""
-            <style>
-            .stApp {{
-                background: linear-gradient(135deg, {Config.BACKGROUND_DARK}, #1a1f2a);
-            }}
-            </style>
-            """, unsafe_allow_html=True)
+        except:
+            pass
     else:
         st.markdown(f"""
         <style>
@@ -251,17 +254,15 @@ def set_background():
         """, unsafe_allow_html=True)
 
 # ============================================
-# ESTILOS CSS (ACTUALIZADOS)
+# ESTILOS CSS
 # ============================================
 def aplicar_estilos():
     st.markdown(f"""
     <style>
-    /* Estilos generales */
     .stApp {{
         background-color: {Config.BACKGROUND_DARK};
     }}
     
-    /* Contenedor principal */
     .main .block-container {{
         background-color: rgba(10, 12, 16, 0.85);
         backdrop-filter: blur(10px);
@@ -273,7 +274,6 @@ def aplicar_estilos():
         max-width: 1000px !important;
     }}
     
-    /* Títulos */
     h1 {{
         color: {Config.PRIMARY_COLOR} !important;
         font-size: 2.5rem !important;
@@ -294,7 +294,6 @@ def aplicar_estilos():
         color: {Config.PRIMARY_COLOR} !important;
     }}
     
-    /* Respuestas del asistente */
     .respuesta-aguwey {{
         background: linear-gradient(145deg, {Config.CARD_BACKGROUND}, #15232e);
         border-left: 6px solid {Config.PRIMARY_COLOR};
@@ -307,14 +306,12 @@ def aplicar_estilos():
         box-shadow: 0 4px 15px rgba(0, 255, 255, 0.1);
     }}
     
-    /* Sidebar */
     [data-testid="stSidebar"] {{
         background: linear-gradient(165deg, #0e1219, #0a0e14);
         border-right: 2px solid {Config.PRIMARY_COLOR};
         padding: 1rem;
     }}
     
-    /* Botones generales */
     .stButton > button {{
         background: linear-gradient(145deg, {Config.SECONDARY_COLOR}, {Config.PRIMARY_COLOR});
         color: black !important;
@@ -330,7 +327,6 @@ def aplicar_estilos():
         box-shadow: 0 4px 15px rgba(0, 255, 255, 0.3);
     }}
     
-    /* Botón de copiar */
     .copy-btn {{
         background: rgba(0, 255, 255, 0.1);
         border: 1px solid {Config.PRIMARY_COLOR};
@@ -343,6 +339,7 @@ def aplicar_estilos():
         transition: all 0.3s ease;
         margin-left: 8px;
     }}
+    
     .copy-btn:hover {{ 
         background: {Config.PRIMARY_COLOR}; 
         color: #000;
@@ -350,25 +347,6 @@ def aplicar_estilos():
         box-shadow: 0 2px 8px rgba(0, 255, 255, 0.3);
     }}
     
-    /* Botones de guardar/exportar */
-    .save-btn {{
-        background: rgba(0, 255, 100, 0.1);
-        border: 1px solid #00ff64;
-        color: #00ff64;
-        border-radius: 8px;
-        padding: 4px 12px;
-        cursor: pointer;
-        font-size: 12px;
-        font-family: sans-serif;
-        transition: all 0.3s ease;
-    }}
-    .save-btn:hover {{ 
-        background: #00ff64; 
-        color: #000;
-        transform: translateY(-1px);
-    }}
-    
-    /* Footer */
     .fixed-footer {{
         position: fixed;
         bottom: 0;
@@ -388,7 +366,6 @@ def aplicar_estilos():
         color: {Config.PRIMARY_COLOR};
     }}
     
-    /* Model badge */
     .model-badge {{
         background: rgba(0, 255, 255, 0.1);
         border: 1px solid {Config.PRIMARY_COLOR};
@@ -399,27 +376,11 @@ def aplicar_estilos():
         margin-left: 10px;
     }}
     
-    /* Chat input */
     .stChatInput input {{
         border-radius: 20px;
         border: 1px solid {Config.PRIMARY_COLOR};
         background: rgba(255, 255, 255, 0.05);
         color: white;
-    }}
-    
-    /* Conversaciones guardadas */
-    .conversacion-item {{
-        background: rgba(0, 255, 255, 0.05);
-        border: 1px solid rgba(0, 255, 255, 0.2);
-        border-radius: 8px;
-        padding: 8px;
-        margin-bottom: 8px;
-        cursor: pointer;
-        transition: all 0.2s;
-    }}
-    .conversacion-item:hover {{
-        background: rgba(0, 255, 255, 0.1);
-        border-color: {Config.PRIMARY_COLOR};
     }}
     </style>
     """, unsafe_allow_html=True)
@@ -428,7 +389,6 @@ def aplicar_estilos():
 # BOTÓN DE COPIAR
 # ============================================
 def boton_copiar(texto: str, id_unico: str) -> None:
-    """Genera un botón de copiado"""
     texto_escapado = (texto.replace('\\', '\\\\')
                            .replace('`', '\\`')
                            .replace('$', '\\$')
@@ -445,7 +405,6 @@ def boton_copiar(texto: str, id_unico: str) -> None:
     <script>
     function copyText_{id_unico}() {{
         const textToCopy = `{texto_escapado}`;
-        
         if (navigator.clipboard && navigator.clipboard.writeText) {{
             navigator.clipboard.writeText(textToCopy).then(() => {{
                 showCopied_{id_unico}();
@@ -456,7 +415,6 @@ def boton_copiar(texto: str, id_unico: str) -> None:
             fallbackCopy_{id_unico}(textToCopy);
         }}
     }}
-    
     function fallbackCopy_{id_unico}(text) {{
         const tempTextArea = document.createElement('textarea');
         tempTextArea.value = text;
@@ -468,7 +426,6 @@ def boton_copiar(texto: str, id_unico: str) -> None:
         document.body.removeChild(tempTextArea);
         showCopied_{id_unico}();
     }}
-    
     function showCopied_{id_unico}() {{
         const btn = document.getElementById("btn_{id_unico}");
         const originalText = btn.innerText;
@@ -476,52 +433,12 @@ def boton_copiar(texto: str, id_unico: str) -> None:
         btn.style.background = "rgba(0, 255, 0, 0.2)";
         btn.style.borderColor = "#00ff00";
         btn.style.color = "#00ff00";
-        
         setTimeout(() => {{ 
             btn.innerText = originalText;
             btn.style.background = "rgba(0, 255, 255, 0.1)";
             btn.style.borderColor = "#00ffff";
             btn.style.color = "#00ffff";
         }}, 2000);
-    }}
-    </script>
-    """
-    components.html(html_code, height=40)
-
-# ============================================
-# BOTÓN DE GUARDAR
-# ============================================
-def boton_guardar_conversacion(messages: List[Dict], id_unico: str) -> None:
-    """Genera un botón para guardar conversación"""
-    html_code = f"""
-    <div style="text-align: right; margin-top: 5px;">
-        <button id="save_{id_unico}" class="save-btn" onclick="saveConversation_{id_unico}()">
-            💾 Guardar conversación
-        </button>
-    </div>
-    <script>
-    function saveConversation_{id_unico}() {{
-        const btn = document.getElementById("save_{id_unico}");
-        const originalText = btn.innerText;
-        btn.innerText = "⏳ Guardando...";
-        btn.style.background = "rgba(255, 165, 0, 0.2)";
-        btn.style.borderColor = "#ffa500";
-        btn.style.color = "#ffa500";
-        
-        // Simular guardado
-        setTimeout(() => {{ 
-            btn.innerText = "✅ ¡Guardado!";
-            btn.style.background = "rgba(0, 255, 0, 0.2)";
-            btn.style.borderColor = "#00ff00";
-            btn.style.color = "#00ff00";
-            
-            setTimeout(() => {{ 
-                btn.innerText = originalText;
-                btn.style.background = "rgba(0, 255, 100, 0.1)";
-                btn.style.borderColor = "#00ff64";
-                btn.style.color = "#00ff64";
-            }}, 2000);
-        }}, 1000);
     }}
     </script>
     """
@@ -542,7 +459,6 @@ class DatosArchivo:
         self.fecha_carga: float = time.time()
     
     def generar_resumen(self) -> str:
-        """Genera un resumen básico del archivo"""
         if self.tipo == "pdf":
             return f"📄 PDF con {self.num_paginas} páginas"
         elif self.tipo in ["excel", "csv"]:
@@ -552,43 +468,16 @@ class DatosArchivo:
             palabras = len(self.contenido_completo.split())
             return f"📝 Documento con {palabras} palabras"
         return "📁 Archivo procesado"
-    
-    def to_dict(self) -> Dict:
-        """Convierte a diccionario para guardar"""
-        return {
-            "nombre": self.nombre,
-            "contenido_completo": self.contenido_completo,
-            "tipo": self.tipo,
-            "num_paginas": self.num_paginas,
-            "num_caracteres": self.num_caracteres,
-            "resumen": self.resumen,
-            "fecha_carga": self.fecha_carga
-        }
-    
-    @classmethod
-    def from_dict(cls, data: Dict) -> 'DatosArchivo':
-        """Crea desde diccionario"""
-        datos = cls()
-        datos.nombre = data.get("nombre", "")
-        datos.contenido_completo = data.get("contenido_completo", "")
-        datos.tipo = data.get("tipo", "")
-        datos.num_paginas = data.get("num_paginas", 0)
-        datos.num_caracteres = data.get("num_caracteres", 0)
-        datos.resumen = data.get("resumen", "")
-        datos.fecha_carga = data.get("fecha_carga", time.time())
-        return datos
 
 # ============================================
 # FUNCIÓN PARA LEER ARCHIVOS
 # ============================================
 def leer_archivo_completo(uploaded_file):
-    """Lee el archivo COMPLETO"""
     if uploaded_file is None:
         return None, "No hay archivo para procesar"
     
     try:
         uploaded_file.seek(0)
-        
         uploaded_file.seek(0, os.SEEK_END)
         file_size = uploaded_file.tell()
         uploaded_file.seek(0)
@@ -600,7 +489,6 @@ def leer_archivo_completo(uploaded_file):
         datos = DatosArchivo()
         datos.nombre = uploaded_file.name
         
-        # PDF
         if nombre.endswith(".pdf"):
             try:
                 reader = PdfReader(uploaded_file)
@@ -620,11 +508,9 @@ def leer_archivo_completo(uploaded_file):
                 
                 if not datos.contenido_completo:
                     return None, "El PDF no contiene texto extraíble"
-                    
             except Exception as e:
                 return None, f"Error al leer PDF: {str(e)}"
         
-        # Excel
         elif nombre.endswith((".xlsx", ".xls")):
             try:
                 df = pd.read_excel(uploaded_file)
@@ -635,17 +521,14 @@ def leer_archivo_completo(uploaded_file):
                 datos.contenido_completo += "DATOS COMPLETOS:\n"
                 datos.contenido_completo += df.to_string()
                 datos.tipo = "excel"
-                
             except Exception as e:
                 return None, f"Error al leer Excel: {str(e)}"
         
-        # CSV
         elif nombre.endswith(".csv"):
             try:
                 raw_data = uploaded_file.read()
                 result = chardet.detect(raw_data)
                 encoding = result['encoding'] or 'utf-8'
-                
                 df = pd.read_csv(io.BytesIO(raw_data), encoding=encoding)
                 datos.dataframe = df
                 datos.contenido_completo = f"📊 ARCHIVO CSV: {uploaded_file.name}\n"
@@ -654,11 +537,9 @@ def leer_archivo_completo(uploaded_file):
                 datos.contenido_completo += "DATOS COMPLETOS:\n"
                 datos.contenido_completo += df.to_string()
                 datos.tipo = "csv"
-                
             except Exception as e:
                 return None, f"Error al leer CSV: {str(e)}"
         
-        # TXT
         elif nombre.endswith(".txt"):
             try:
                 contenido = uploaded_file.read()
@@ -666,40 +547,31 @@ def leer_archivo_completo(uploaded_file):
                 encoding = result['encoding'] or 'utf-8'
                 datos.contenido_completo = contenido.decode(encoding)
                 datos.tipo = "txt"
-                
             except Exception as e:
                 return None, f"Error al leer TXT: {str(e)}"
         
-        # Word
         elif nombre.endswith(".docx"):
             try:
                 doc = Document(uploaded_file)
                 texto_completo = []
-                
                 for p in doc.paragraphs:
                     if p.text.strip():
                         texto_completo.append(p.text)
-                
                 for table in doc.tables:
                     for row in table.rows:
                         row_text = [cell.text for cell in row.cells]
                         texto_completo.append(" | ".join(row_text))
-                
                 datos.contenido_completo = "\n".join(texto_completo)
                 datos.tipo = "docx"
-                
                 if not datos.contenido_completo:
                     return None, "El documento no contiene texto"
-                    
             except Exception as e:
                 return None, f"Error al leer DOCX: {str(e)}"
-        
         else:
             return None, f"Tipo de archivo no soportado: {nombre.split('.')[-1]}"
         
         datos.num_caracteres = len(datos.contenido_completo)
         datos.resumen = datos.generar_resumen()
-        
         return datos, None
         
     except Exception as e:
@@ -709,25 +581,35 @@ def leer_archivo_completo(uploaded_file):
 # FUNCIÓN PARA STREAMING CON MINISTRAL (CORREGIDA)
 # ============================================
 def generar_respuesta_streaming(messages, container):
-    """Genera respuesta con streaming usando Mistral AI"""
     try:
         full_response = ""
         response_container = container.empty()
         
-        # Realizar la solicitud con streaming (API corregida)
-        stream_response = client.chat.stream(
-            model=MODEL_NAME,
-            messages=messages,
-            temperature=0.2,
-            max_tokens=2000,
-        )
+        # Usar la API según disponibilidad
+        if MISTRAL_NEW_API:
+            stream_response = client.chat_stream(
+                model=MODEL_NAME,
+                messages=messages,
+                temperature=0.2,
+                max_tokens=2000,
+            )
+        else:
+            stream_response = client.chat.stream(
+                model=MODEL_NAME,
+                messages=messages,
+                temperature=0.2,
+                max_tokens=2000,
+            )
         
         start_time = time.time()
         
-        # Procesar el stream
         for chunk in stream_response:
-            if chunk.data.choices[0].delta.content is not None:
+            if MISTRAL_NEW_API:
+                content = chunk.choices[0].delta.content
+            else:
                 content = chunk.data.choices[0].delta.content
+                
+            if content is not None:
                 full_response += content
                 
                 elapsed = time.time() - start_time
@@ -747,13 +629,12 @@ def generar_respuesta_streaming(messages, container):
         
     except Exception as e:
         st.error(f"❌ Error en streaming: {str(e)}")
-        return f"Error: {str(e)}"
+        return f"Error al generar respuesta: {str(e)}"
 
 # ============================================
 # TEXTO A VOZ
 # ============================================
 def texto_a_audio_unico(texto: str) -> Optional[bytes]:
-    """Convierte texto a audio"""
     if not TTS_AVAILABLE or not texto or not texto.strip():
         return None
     
@@ -765,11 +646,9 @@ def texto_a_audio_unico(texto: str) -> Optional[bytes]:
             return None
             
         tts = gTTS(text=texto_limpio, lang='es', slow=False)
-        
         audio_bytes_io = io.BytesIO()
         tts.write_to_fp(audio_bytes_io)
         audio_bytes_io.seek(0)
-        
         return audio_bytes_io.getvalue()
         
     except Exception as e:
@@ -777,44 +656,9 @@ def texto_a_audio_unico(texto: str) -> Optional[bytes]:
         return None
 
 # ============================================
-# MOSTRAR LOGO
-# ============================================
-def mostrar_logo():
-    if os.path.exists(Config.LOGO_PATH):
-        try:
-            from PIL import Image
-            logo = Image.open(Config.LOGO_PATH)
-            st.sidebar.image(logo, width=200)
-        except:
-            st.sidebar.markdown("# 🤖 AguweyBot")
-    else:
-        st.sidebar.markdown("""
-        # 🤖 AguweyBot
-        ### *Asistente con Ministral-3*
-        """)
-
-def mostrar_info_archivo(datos: DatosArchivo) -> None:
-    """Muestra información del archivo cargado"""
-    if datos:
-        with st.sidebar.expander("📁 Archivo activo", expanded=True):
-            st.markdown(f"""
-            **Nombre:** {datos.nombre}
-            **Tipo:** {datos.resumen}
-            **Tamaño:** {datos.num_caracteres:,} caracteres
-            **Cargado:** {datetime.fromtimestamp(datos.fecha_carga).strftime('%H:%M:%S')}
-            """)
-            
-            if datos.tipo in ["excel", "csv"] and datos.dataframe is not None:
-                st.dataframe(datos.dataframe.head(5), use_container_width=True)
-            elif datos.num_caracteres > 500:
-                with st.expander("📄 Vista previa"):
-                    st.text(datos.contenido_completo[:500] + "...")
-
-# ============================================
-# FUNCIÓN PARA EXPORTAR CONVERSACIÓN
+# EXPORTAR CONVERSACIÓN
 # ============================================
 def exportar_conversacion(messages: List[Dict]) -> str:
-    """Exporta conversación a formato de texto"""
     export_text = "=" * 60 + "\n"
     export_text += f"CONVERSACIÓN AGUWEYBOT - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
     export_text += "=" * 60 + "\n\n"
@@ -833,7 +677,7 @@ def exportar_conversacion(messages: List[Dict]) -> str:
     return export_text
 
 # ============================================
-# FUNCIÓN PRINCIPAL (ACTUALIZADA)
+# FUNCIÓN PRINCIPAL
 # ============================================
 def main():
     st.set_page_config(
@@ -857,12 +701,11 @@ def main():
         st.session_state.audio_actual_bytes = None
     if "ultimo_audio_idx" not in st.session_state:
         st.session_state.ultimo_audio_idx = -1
-    if "conversacion_guardada" not in st.session_state:
-        st.session_state.conversacion_guardada = False
     
     # Sidebar
     with st.sidebar:
-        mostrar_logo()
+        st.markdown("# 🤖 AguweyBot")
+        st.markdown("### *Asistente con Ministral-3*")
         st.markdown("---")
         
         st.markdown("### 🔑 Estado")
@@ -875,28 +718,19 @@ def main():
         
         st.markdown("---")
         
-        # ===== NUEVA SECCIÓN: CONVERSACIONES GUARDADAS =====
-        st.markdown("### 💾 Conversaciones Guardadas")
-        
-        # Botón para guardar conversación actual
+        # Guardar conversación
+        st.markdown("### 💾 Conversaciones")
         if st.session_state.messages:
             col1, col2 = st.columns(2)
             with col1:
-                if st.button("💾 Guardar", use_container_width=True, help="Guardar conversación actual"):
-                    nombre_predeterminado = None
-                    filename = ConversacionGuardada.guardar_conversacion(
-                        st.session_state.messages, 
-                        nombre_predeterminado
-                    )
-                    st.session_state.conversacion_guardada = True
+                if st.button("💾 Guardar", use_container_width=True):
+                    filename = ConversacionGuardada.guardar_conversacion(st.session_state.messages)
                     st.success(f"✅ ¡Conversación guardada!")
                     st.rerun()
-            
             with col2:
-                # Exportar como texto
                 export_text = exportar_conversacion(st.session_state.messages)
                 st.download_button(
-                    label="📄 Exportar TXT",
+                    label="📄 Exportar",
                     data=export_text,
                     file_name=f"conversacion_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
                     mime="text/plain",
@@ -907,40 +741,23 @@ def main():
         
         # Lista de conversaciones guardadas
         conversaciones = ConversacionGuardada.listar_conversaciones()
-        
         if conversaciones:
-            st.markdown("**📚 Conversaciones guardadas:**")
-            
-            for i, conv in enumerate(conversaciones[:5]):  # Mostrar solo las 5 más recientes
-                timestamp = conv["timestamp"]
+            st.markdown("**📚 Guardadas:**")
+            for i, conv in enumerate(conversaciones[:5]):
                 try:
-                    fecha = datetime.strptime(timestamp, "%Y%m%d_%H%M%S").strftime("%d/%m/%Y %H:%M")
+                    fecha = datetime.strptime(conv["timestamp"], "%Y%m%d_%H%M%S").strftime("%d/%m/%Y %H:%M")
                 except:
-                    fecha = timestamp
+                    fecha = conv["timestamp"]
                 
-                col1, col2, col3 = st.columns([6, 1, 1])
-                
+                col1, col2 = st.columns([8, 1])
                 with col1:
-                    if st.button(f"📝 {conv['nombre'][:30]}... ({fecha})", key=f"load_{i}", use_container_width=True):
+                    if st.button(f"📝 {conv['nombre'][:25]}...", key=f"load_{i}", use_container_width=True):
                         mensajes_cargados = ConversacionGuardada.cargar_conversacion(conv["filename"])
                         if mensajes_cargados:
                             st.session_state.messages = mensajes_cargados
                             st.success("✅ Conversación cargada")
                             st.rerun()
-                
                 with col2:
-                    # Exportar conversación guardada
-                    if st.button("📄", key=f"export_{i}", help="Exportar como TXT"):
-                        export_text = exportar_conversacion(conv.get("mensajes", []))
-                        st.download_button(
-                            label="⬇️",
-                            data=export_text,
-                            file_name=f"{conv['nombre']}.txt",
-                            mime="text/plain",
-                            key=f"dl_{i}"
-                        )
-                
-                with col3:
                     if st.button("🗑️", key=f"del_{i}", help="Eliminar"):
                         if ConversacionGuardada.eliminar_conversacion(conv["filename"]):
                             st.success("✅ Eliminada")
@@ -950,39 +767,40 @@ def main():
         
         st.markdown("---")
         
-        # ===== SECCIÓN DE ARCHIVOS =====
+        # Subir archivo
         st.markdown("### 📎 Subir Archivo")
-        
         uploaded_file = st.file_uploader(
             "Elige un archivo",
             type=["pdf", "xlsx", "xls", "csv", "txt", "docx"],
             key="file_uploader",
-            label_visibility="collapsed",
-            help="Formatos soportados: PDF, Excel, CSV, TXT, DOCX"
+            label_visibility="collapsed"
         )
         
         if uploaded_file is not None:
             col1, col2 = st.columns(2)
             with col1:
                 if st.button("📖 Leer TODO", key="btn_leer", use_container_width=True):
-                    with st.spinner("📖 Leyendo archivo COMPLETO..."):
+                    with st.spinner("📖 Leyendo archivo..."):
                         datos, error = leer_archivo_completo(uploaded_file)
-                        
                         if error:
                             st.error(f"❌ {error}")
                         elif datos:
                             st.session_state.datos_archivo = datos
                             st.success(f"✅ {datos.resumen}")
                             st.balloons()
-            
             with col2:
                 if st.button("🔄 Limpiar", use_container_width=True):
                     st.session_state.datos_archivo = None
-                    st.session_state.ultimo_audio_idx = -1
                     st.rerun()
         
         if st.session_state.datos_archivo:
-            mostrar_info_archivo(st.session_state.datos_archivo)
+            with st.expander("📁 Archivo activo", expanded=True):
+                datos = st.session_state.datos_archivo
+                st.markdown(f"""
+                **Nombre:** {datos.nombre}
+                **Tipo:** {datos.resumen}
+                **Tamaño:** {datos.num_caracteres:,} caracteres
+                """)
         
         st.markdown("---")
         
@@ -990,23 +808,12 @@ def main():
             st.session_state.messages = []
             st.session_state.audio_actual_bytes = None
             st.session_state.ultimo_audio_idx = -1
-            st.session_state.conversacion_guardada = False
             st.success("¡Conversación reiniciada!")
             st.rerun()
-        
-        if st.session_state.messages:
-            st.markdown("### 📊 Estadísticas")
-            user_msgs = sum(1 for m in st.session_state.messages if m["role"] == "user")
-            assistant_msgs = sum(1 for m in st.session_state.messages if m["role"] == "assistant")
-            st.markdown(f"""
-            - 💬 Mensajes: {len(st.session_state.messages)}
-            - 👤 Usuario: {user_msgs}
-            - 🤖 Asistente: {assistant_msgs}
-            """)
     
     # Contenido principal
     st.markdown("<h1>🤖 AguweyBot <span class='model-badge'>Ministral-3</span></h1>", unsafe_allow_html=True)
-    st.markdown('<p class="subtitle">Asistente inteligente con análisis de documentos, audio y guardado de conversaciones</p>', unsafe_allow_html=True)
+    st.markdown('<p class="subtitle">Asistente inteligente con análisis de documentos y audio</p>', unsafe_allow_html=True)
     
     # Mostrar historial
     for i, msg in enumerate(st.session_state.messages):
@@ -1014,8 +821,7 @@ def main():
             if msg["role"] == "assistant":
                 st.markdown(f'<div class="respuesta-aguwey">{msg["content"]}</div>', unsafe_allow_html=True)
                 
-                col_audio, col_copy, col_spacer = st.columns([1, 1, 4])
-                
+                col_audio, col_copy, _ = st.columns([1, 1, 4])
                 with col_audio:
                     if TTS_AVAILABLE:
                         if st.button(f"🔊 Escuchar", key=f"audio_{i}"):
@@ -1025,14 +831,12 @@ def main():
                                     st.session_state.audio_actual_bytes = audio_bytes
                                     st.session_state.ultimo_audio_idx = i
                                     st.rerun()
-                
                 with col_copy:
                     boton_copiar(msg["content"], f"copy_{i}")
                 
                 if (st.session_state.get('audio_actual_bytes') and 
                     st.session_state.ultimo_audio_idx == i):
                     st.audio(st.session_state.audio_actual_bytes, format="audio/mpeg")
-            
             else:
                 st.markdown(f"**Tú:** {msg['content']}")
     
@@ -1046,81 +850,53 @@ def main():
         2. Haz clic en **"Leer TODO"**
         3. Pregúntame sobre el contenido
         
-        **💾 Nuevo:** ¡Ahora puedes guardar y cargar tus conversaciones!
-        - Usa **"Guardar"** para almacenar la conversación actual
-        - Usa **"Exportar TXT"** para descargar como archivo de texto
-        - Carga conversaciones previas desde la lista en el panel lateral
+        **💾 Guarda conversaciones** para retomarlas después
         
-        **🔊 Audio:** Haz clic en "Escuchar" debajo de cualquier respuesta para oírla.
-        **📋 Copiar:** Usa el botón "Copiar" para guardar respuestas.
-        
-        ⚡ **Modelo:** Ministral-3 - Optimizado para respuestas rápidas y eficientes
+        ⚡ **Modelo:** Ministral-3 - Optimizado para respuestas rápidas
         """)
         st.session_state.primer_mensaje = False
     
     # Input del usuario
-    prompt = st.chat_input("Escribe tu pregunta aquí...", key="chat_input")
+    prompt = st.chat_input("Escribe tu pregunta aquí...")
     
     if prompt:
         st.session_state.messages.append({"role": "user", "content": prompt})
-        st.session_state.conversacion_guardada = False  # Marcar que hay cambios sin guardar
         
         with st.chat_message("user"):
             st.markdown(f"**Tú:** {prompt}")
         
         with st.chat_message("assistant"):
             try:
-                # Construir mensajes para Mistral (usando diccionarios)
-                messages = []
+                # Construir mensajes
+                messages = [{"role": "system", "content": SYSTEM_PROMPT}]
                 
-                # Agregar sistema
-                messages.append({"role": "system", "content": SYSTEM_PROMPT})
+                # Agregar historial
+                for m in st.session_state.messages[-Config.MAX_HISTORY_MESSAGES:]:
+                    messages.append({"role": m["role"], "content": m["content"]})
                 
-                # Agregar historial reciente
-                ultimos_mensajes = st.session_state.messages[-Config.MAX_HISTORY_MESSAGES:]
-                for m in ultimos_mensajes:
-                    if m["role"] == "user":
-                        messages.append({"role": "user", "content": m["content"]})
-                    elif m["role"] == "assistant":
-                        messages.append({"role": "assistant", "content": m["content"]})
-                
-                # Agregar contexto del archivo si existe
+                # Agregar contexto del archivo
                 if st.session_state.datos_archivo:
                     datos = st.session_state.datos_archivo
-                    
                     contenido_truncado = truncar_contexto(datos.contenido_completo, Config.MAX_CONTEXT_TOKENS)
-                    
                     contexto = f"""
-📁 ARCHIVO COMPLETO: {datos.nombre}
-TIPO: {datos.tipo}
-RESUMEN: {datos.resumen}
+📁 ARCHIVO: {datos.nombre}
+TIPO: {datos.resumen}
 
-========== CONTENIDO DEL ARCHIVO ==========
-
+========== CONTENIDO ==========
 {contenido_truncado}
+========== FIN CONTENIDO ==========
 
-========== FIN DEL CONTENIDO ==========
-
-PREGUNTA DEL USUARIO: {prompt}
-
-IMPORTANTE: Usa TODO el contenido del archivo para responder.
+PREGUNTA: {prompt}
 """
                     messages.append({"role": "user", "content": contexto})
-                else:
-                    messages.append({"role": "user", "content": prompt})
                 
-                # Generar respuesta con streaming
+                # Generar respuesta
                 container = st.empty()
                 response = generar_respuesta_streaming(messages, container)
                 
-                # Guardar respuesta
                 st.session_state.messages.append({"role": "assistant", "content": response})
                 
-                # Limpiar audio anterior
-                st.session_state.audio_actual_bytes = None
-                st.session_state.ultimo_audio_idx = -1
-                
-                # Auto-generar audio para respuestas largas
+                # Auto-generar audio
                 if TTS_AVAILABLE and len(response) > 100:
                     audio_bytes = texto_a_audio_unico(response)
                     if audio_bytes:
@@ -1129,15 +905,13 @@ IMPORTANTE: Usa TODO el contenido del archivo para responder.
                         st.rerun()
                         
             except Exception as e:
-                st.error(f"❌ Error al generar respuesta: {str(e)}")
-                st.exception(e)
+                st.error(f"❌ Error: {str(e)}")
     
     # Footer
     st.markdown(
         f"""
         <div class="fixed-footer">
-            <strong>CC-SA</strong> Prof. Raymond Rosa Ávila • AguweyBot con Ministral-3 2026 • 
-            <span data-tooltip="Versión optimizada con Mistral AI + Guardado de conversaciones">🚀 v5.0</span>
+            <strong>CC-SA</strong> Prof. Raymond Rosa Ávila • AguweyBot con Ministral-3 2026 • 🚀 v5.0
         </div>
         """,
         unsafe_allow_html=True
