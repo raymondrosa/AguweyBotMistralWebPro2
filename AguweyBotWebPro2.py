@@ -1,6 +1,6 @@
 # ============================================
-# AGUWEYBOT - VERSIÓN MINISTRAL-3 (CÓDIGO CORREGIDO FINAL)
-# COMPATIBLE CON STREAMLIT CLOUD - ABRIL 2026
+# AGUWEYBOT - VERSIÓN MINISTRAL-3 (CÓDIGO COMPLETO FINAL)
+# CON LOGO DESDE GITHUB - ABRIL 2026
 # ============================================
 
 import os
@@ -15,16 +15,14 @@ import requests
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 
-# ============================================
-# IMPORTACIÓN DE MISTRAL AI - MÉTODO DIRECTO CON REQUESTS
-# ============================================
-# Usamos requests directamente para evitar problemas de compatibilidad
-
 # Para documentos
 from PyPDF2 import PdfReader
 from docx import Document
 import pandas as pd
 import chardet
+
+# Para imágenes
+from PIL import Image
 
 # ============================================
 # TEXTO A VOZ
@@ -187,6 +185,7 @@ def truncar_contexto(texto: str, max_caracteres: int = 6000) -> str:
 # FUNCIÓN PARA FONDO
 # ============================================
 def set_background():
+    """Aplica la imagen de fondo si existe"""
     if os.path.exists(Config.BACKGROUND_PATH):
         try:
             with open(Config.BACKGROUND_PATH, "rb") as f:
@@ -218,26 +217,17 @@ def set_background():
                 unsafe_allow_html=True
             )
         except:
-            pass
+            aplicar_fondo_gradiente()
     else:
-        st.markdown(f"""
-        <style>
-        .stApp {{
-            background: linear-gradient(135deg, {Config.BACKGROUND_DARK}, #1a1f2a);
-        }}
-        </style>
-        """, unsafe_allow_html=True)
+        aplicar_fondo_gradiente()
 
-# ============================================
-# ESTILOS CSS
-# ============================================
-def aplicar_estilos():
+def aplicar_fondo_gradiente():
+    """Aplica un fondo con gradiente como fallback"""
     st.markdown(f"""
     <style>
     .stApp {{
-        background-color: {Config.BACKGROUND_DARK};
+        background: linear-gradient(135deg, {Config.BACKGROUND_DARK}, #1a1f2a);
     }}
-    
     .main .block-container {{
         background-color: rgba(10, 12, 16, 0.85);
         backdrop-filter: blur(10px);
@@ -248,7 +238,99 @@ def aplicar_estilos():
         box-shadow: 0 0 30px rgba(0, 255, 255, 0.2);
         max-width: 1000px !important;
     }}
+    </style>
+    """, unsafe_allow_html=True)
+
+# ============================================
+# FUNCIÓN PARA MOSTRAR LOGO
+# ============================================
+def mostrar_logo():
+    """Muestra el logo desde archivo local o un fallback estilizado"""
+    if os.path.exists(Config.LOGO_PATH):
+        try:
+            # Intentar cargar y mostrar la imagen
+            logo = Image.open(Config.LOGO_PATH)
+            st.sidebar.image(logo, use_container_width=True)
+        except Exception as e:
+            # Si hay error, mostrar fallback
+            st.sidebar.warning(f"No se pudo cargar el logo: {str(e)}")
+            mostrar_logo_fallback()
+    else:
+        # Si no existe el archivo, mostrar fallback
+        mostrar_logo_fallback()
+
+def mostrar_logo_fallback():
+    """Muestra un logo estilizado con HTML/CSS"""
+    st.sidebar.markdown("""
+    <style>
+    @keyframes pulse {
+        0% { box-shadow: 0 0 0 0 rgba(0, 255, 255, 0.7); }
+        70% { box-shadow: 0 0 0 20px rgba(0, 255, 255, 0); }
+        100% { box-shadow: 0 0 0 0 rgba(0, 255, 255, 0); }
+    }
     
+    @keyframes float {
+        0% { transform: translateY(0px); }
+        50% { transform: translateY(-8px); }
+        100% { transform: translateY(0px); }
+    }
+    
+    .logo-container {
+        text-align: center;
+        padding: 20px 0;
+        animation: float 3s ease-in-out infinite;
+    }
+    
+    .logo-circle {
+        background: linear-gradient(145deg, #00cccc, #00ffff);
+        border-radius: 50%;
+        width: 140px;
+        height: 140px;
+        margin: 0 auto;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border: 3px solid #00ffff;
+        animation: pulse 2s infinite;
+    }
+    
+    .logo-emoji {
+        font-size: 75px;
+        filter: drop-shadow(0 0 10px rgba(0, 255, 255, 0.5));
+    }
+    
+    .logo-title {
+        color: #00ffff;
+        margin-top: 15px;
+        font-size: 28px;
+        font-weight: bold;
+        text-shadow: 0 0 20px rgba(0, 255, 255, 0.5);
+        letter-spacing: 2px;
+    }
+    
+    .logo-subtitle {
+        color: #e0e5f0;
+        font-size: 13px;
+        opacity: 0.9;
+        margin-top: -5px;
+    }
+    </style>
+    
+    <div class="logo-container">
+        <div class="logo-circle">
+            <span class="logo-emoji">🤖</span>
+        </div>
+        <div class="logo-title">AGUWEYBOT</div>
+        <div class="logo-subtitle">Ministral-3</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+# ============================================
+# ESTILOS CSS
+# ============================================
+def aplicar_estilos():
+    st.markdown(f"""
+    <style>
     h1 {{
         color: {Config.PRIMARY_COLOR} !important;
         font-size: 2.5rem !important;
@@ -553,10 +635,10 @@ def leer_archivo_completo(uploaded_file):
         return None, f"Error inesperado: {str(e)}"
 
 # ============================================
-# FUNCIÓN PARA STREAMING CON MISTRAL (API DIRECTA CON REQUESTS)
+# FUNCIÓN PARA STREAMING CON MISTRAL (API REST)
 # ============================================
 def generar_respuesta_streaming(messages, container):
-    """Genera respuesta con streaming usando la API REST de Mistral directamente"""
+    """Genera respuesta con streaming usando la API REST de Mistral"""
     try:
         full_response = ""
         response_container = container.empty()
@@ -566,7 +648,6 @@ def generar_respuesta_streaming(messages, container):
             "Content-Type": "application/json"
         }
         
-        # Preparar mensajes en el formato correcto
         formatted_messages = []
         for msg in messages:
             formatted_messages.append({
@@ -582,7 +663,6 @@ def generar_respuesta_streaming(messages, container):
             "stream": True
         }
         
-        # Hacer la solicitud con streaming
         response = requests.post(
             MISTRAL_API_URL,
             headers=headers,
@@ -597,12 +677,11 @@ def generar_respuesta_streaming(messages, container):
         
         start_time = time.time()
         
-        # Procesar el stream
         for line in response.iter_lines():
             if line:
                 line = line.decode('utf-8')
                 if line.startswith('data: '):
-                    line = line[6:]  # Quitar 'data: '
+                    line = line[6:]
                     if line.strip() == '[DONE]':
                         break
                     
@@ -715,8 +794,9 @@ def main():
     
     # Sidebar
     with st.sidebar:
-        st.markdown("# 🤖 AguweyBot")
-        st.markdown("### *Asistente con Ministral-3*")
+        # Mostrar logo (desde archivo o fallback)
+        mostrar_logo()
+        
         st.markdown("---")
         
         st.markdown("### 🔑 Estado")
@@ -922,7 +1002,7 @@ PREGUNTA: {prompt}
     st.markdown(
         f"""
         <div class="fixed-footer">
-            <strong>CC-SA</strong> Prof. Raymond Rosa Ávila • AguweyBot con Ministral-3 2026 • 🚀 v5.1
+            <strong>CC-SA</strong> Prof. Raymond Rosa Ávila • AguweyBot con Ministral-3 2026 • 🚀 v6.0
         </div>
         """,
         unsafe_allow_html=True
